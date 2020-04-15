@@ -1,0 +1,42 @@
+1. Tạo 1 folder cho project để chứa tất cả data code giả sử folder speech2text
+2. clone repo của deepspeech vào đây luôn git clone https://github.com/mozilla/DeepSpeech.git
+3. Activate môi trường, cd vào DeepSpeech vừa clone về, cài đặt các thư viện cần thiết bằng: pip install -r requirements.txt
+4. File âm thanh mp3 để trong 1 folder mp3 
+5. Tạo 1 file text có định dạng như bên dưới chứa tất cả tên những file âm thanh trong folder trên và nội dung tương ứng
+   giả sử file tên prompt.txt dạng: filename content ,e.g: 001 đại học bách khoa
+6. Tạo 1 file text chỉ chưa nội dung âm thanh (phần content của file txt kia) giả sử đặt là content.txt
+7. Build language model(lm)
+   7.1 Tiền xử lý dữ liệu cho language  model: 
+       python preprocess_lm.py -i <path_input_text> -o <path_output_text_lm>
+       eg: python preprocess_lm.py -i /home/nhatnt/Documents/speech2text/tughi/content.txt -o /home/nhatnt/Documents/speech2text/tughi/content_lm.txt
+   7.2 git clone https://github.com/kpu/kenlm.git 
+   7.3 cd kenlm/
+   7.3 mkdir build
+   7.4 cd build/
+   7.5 cmake ..
+   7.6 make -j 4
+   7.7 cd ra ngoài folder speech2text 
+   7.8 Tạo 1 folder chứa model language này giả sử tên vietnamese_model
+   7.9 cd vietnamese_model
+   7.10 Chuyển file content_lm.txt vào folder này
+   7.11 ../kenlm/build/bin/lmplz  -o 3 <content.txt >lm.arpa
+   7.12 ../kenlm/build/bin/build_binary lm.arpa lm.binary
+8. Sau khi tạo được lm.binary cần tạo file trie cho lm (vẫn ở trong folder vietnamese_model)
+   8.1 Tạo file alphabet.txt chưa toàn bộ các ký tự đơn có trong content.txt như a b c â ... để vào trong vietnamese_model
+   8.2 Tải generate_trie: python util/taskcluster.py --arch cpu --target native_client (lúc này phải vào folder DeepSpeech)
+   8.3 ../DeepSpeech/native_client/generate_trie alphabet.txt lm.binary trie (ở folder vietnamese_model)
+9. Tạo file csv để train từ mp3 và file text ở trên
+   9.1 Tạo 1 folder wav để chứa các file convert từ mp3 sang wav bằng cách run python mp3towav.py -i <path_folder_mp3> -o <path_folder_wav>
+   9.2 Tạo train.csv, dev.csv, test.csv bằng python create_csv_data.py -i <path_text_file> -p <path_folder_wav> -o <path_output>, text file chính là prompt.txt ban đầu
+   9.3 Để tập dữ liệu thêm đa dạng cần thêm nhiễu, tăng tốc độ, thêm tiếng vọng, ... bằng cách chạy:
+       python data_augmentation.py -i <path_train.csv> -w <path_wav_folder> -o <path_save_output>
+   
+10. Như vậy đã chuẩn bị dữ liệu xong bây giờ cd vào folder DeepSpeech để training
+    Xem Flags phù hợp rồi truyền vào những đường dẫn phù hợp 
+    e.g: python -u DeepSpeech.py --train_files /home/nhatnt/Documents/speech2text/tughi/train_augment.csv --dev_files /home/nhatnt/Documents/speech2text/tughi/dev.csv --test_files /home/nhatnt/Documents/speech2text/tughi/test.csv --train_batch_size 4 --dev_batch_size 2 --test_batch_size 2 --n_hidden 375 --epochs 100 --early_stop True --es_steps 20 --dropout_rate 0.01 --learning_rate 0.0005 --export_dir /home/nhatnt/Documents/speech2text/result_vn_stt/model_export_tughi_375_0005 --checkpoint_dir /home/nhatnt/Documents/speech2text/result_vn_stt/checkout_tughi_375_0005 --alphabet_config_path /home/nhatnt/Documents/speech2text/tughi/alphabet.txt --lm_binary_path /home/nhatnt/Documents/speech2text/tughi/lm_title_tughi.binary --lm_trie_path /home/nhatnt/Documents/speech2text/tughi/trie_title_tughi
+11. Sau khi train xong weight sẽ để trong đường dẫn export_dir tên output_graph.pb, cần chuyển sang output_graph.pbmm nhẹ hơn:
+    11.1 cd DeepSpeech chạy python util/taskcluster.py --source tensorflow --artifact convert_graphdef_memmapped_format --branch r1.14 --target .
+    11.2 convert_graphdef_memmapped_format --in_graph=<path_pb> --out_graph=<path_pbmm>
+12. Chạy demo:
+    12.1 pip install deepspeech
+    12.2 deepspeech --model <path_output_graph.pbmm> --lm <path_lm.binary> --trie <path_trie> --audio <path_wav>
